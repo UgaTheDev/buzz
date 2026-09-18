@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { buildIndependentThreadPanel } from "./independentThreadPanel.ts";
+import { mergeMessages } from "./messageMerge.ts";
+import { sortMessages } from "./messageQueryKeys.ts";
 
 const ROOT_ID = "6".repeat(64);
 const EDIT_ID = "9".repeat(64);
@@ -183,4 +185,49 @@ test("does not resurrect a deleted head reaction carried in the channel window",
   const deletion = deletionEvent(AUX_DELETION_ID, REACTION_ID);
   const result = head([root, reaction, deletion], []);
   assert.equal(result?.reactions, undefined);
+});
+
+test("editing a thread reply repeatedly keeps one row in its original position", () => {
+  // Regression guard for #7701: two kind:40003 edits of the middle reply,
+  // merged the way the live subscription merges them into the thread cache.
+  const root = contentEvent(ROOT_ID, "root");
+  const replyTags = [
+    ["e", ROOT_ID, "", "root"],
+    ["e", ROOT_ID, "", "reply"],
+  ];
+  const first = {
+    ...contentEvent("1".repeat(64), "one", replyTags),
+    created_at: 1001,
+  };
+  const middle = {
+    ...contentEvent(REPLY_ID, "two", replyTags),
+    created_at: 1002,
+  };
+  const last = {
+    ...contentEvent("3".repeat(64), "three", replyTags),
+    created_at: 1003,
+  };
+  let cache = sortMessages([first, middle, last]);
+  cache = mergeMessages(cache, editEvent(EDIT_ID, REPLY_ID, "two v2", 2000));
+  cache = mergeMessages(
+    cache,
+    editEvent("8".repeat(64), REPLY_ID, "two v3", 3000),
+  );
+
+  const result = buildIndependentThreadPanel(
+    [root],
+    cache,
+    ROOT_ID,
+    ROOT_ID,
+    new Set(),
+    null,
+    AUTHOR,
+    null,
+  );
+  assert.deepEqual(
+    result.visibleReplies.map((entry) => entry.message.id),
+    [first.id, REPLY_ID, last.id],
+  );
+  assert.equal(result.visibleReplies[1].message.body, "two v3");
+  assert.equal(result.visibleReplies[1].message.edited, true);
 });

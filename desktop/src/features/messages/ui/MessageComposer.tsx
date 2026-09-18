@@ -553,8 +553,13 @@ function MessageComposerImpl({
   });
   const submitMessage = React.useCallback(async () => {
     const trimmed = syncComposerContentFromEditor().trim();
-    // Edit mode
-    if (editTargetRef.current && onEditSaveRef.current) {
+    // Edit mode. Never fall through to the send path while an edit target is
+    // armed: without a save handler that would publish the edited body as a
+    // brand-new message (a fresh event appended to the thread on every save)
+    // instead of a kind:40003 edit of the original.
+    if (editTargetRef.current) {
+      const save = onEditSaveRef.current;
+      if (!save) return;
       // A live recording must be finished or discarded explicitly; never let an
       // edit save snapshot text while a voice note is mid-capture (the editor's
       // Enter shortcut bypasses the toolbar's Finish/Discard controls).
@@ -577,7 +582,7 @@ function MessageComposerImpl({
         queuedAttachments: media.queuedAttachmentsRef.current,
         spoileredAttachmentUrls,
         extractMentionPubkeys: extractMentionPubkeysRef.current,
-        save: onEditSaveRef.current,
+        save,
         clearComposer: () => {
           setComposerContent("");
           richText.clearContent();
